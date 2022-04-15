@@ -1,36 +1,34 @@
-from rest_framework.utils import serializer_helpers
-from rest_framework.viewsets import ModelViewSet
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import generics
-from rest_framework.renderers import JSONRenderer
+from rest_framework import viewsets
 from .models import *
 from .serializers import *
 from django.db import connection
+from django.db.models import Q
 from rest_framework import permissions
 from datetime import datetime, timedelta, date
 
+
 class GetUserData(APIView):
     permission_classes = [permissions.IsAuthenticated]
+
     def post(self, request):
         cursor = connection.cursor()
         token = request.headers['Authorization'].split(' ')[1]
-        #print(request.data)
+        # print(request.data)
         cursor.execute(
             ''' SELECT user_id, username, is_staff FROM authtoken_token JOIN auth_user ON user_id=id WHERE key='{}' 
             '''.format(token))
         row = cursor.fetchone()
-        return Response({"user_id":row[0], "username":row[1], "is_staff":row[2]})
+        return Response({"user_id": row[0], "username": row[1], "is_staff": row[2]})
 
-class EnqTypeList(generics.ListAPIView):
+
+class EnqTypeGet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, ]
     queryset = EquipmentType.objects.all()
     serializer_class = EnqTypeSerializer
 
-class EnqTypeDetailView(generics.RetrieveAPIView):
-    permission_classes = [permissions.IsAuthenticated]
-    queryset = EquipmentType.objects.all()
-    serializer_class = EnqTypeSerializer
 
 class EnqTypeAPI(APIView):
     def post(self, request):
@@ -44,7 +42,7 @@ class EnqTypeAPI(APIView):
                 instance = EquipmentType.objects.get(id=pk)
                 instance.name = request.data.get('name')
                 instance.save()
-                return Response({"status":"update"})
+                return Response({"status": "update"})
         else:
             return Response({"status": "error"})
 
@@ -57,22 +55,21 @@ class EnqTypeRemove(APIView):
         instance = EquipmentType.objects.get(id=pk)
         instance.delete()
         return Response(status=201)
+
+
 ################################################################
 
 
-class RoomTypeList(generics.ListAPIView):
+class RoomTypeGet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated, ]
     queryset = RoomType.objects.all()
     serializer_class = RoomTypeSerializer
 
-class RoomTypeDetailView(generics.RetrieveAPIView):
-    permission_classes = [permissions.IsAuthenticated]
-    queryset = RoomType.objects.all()
-    serializer_class = RoomTypeSerializer
 
 class RoomTypeAPI(APIView):
     def post(self, request):
         serializer = RoomTypeSerializer(data=request.data)
-        #print(serializer)
+        # print(serializer)
         if serializer.is_valid():
             pk = request.data.get('id')
             if pk is None:
@@ -86,6 +83,7 @@ class RoomTypeAPI(APIView):
         else:
             return Response({"status": "error"})
 
+
 class RoomTypeRemove(APIView):
     def post(self, request):
         pk = request.data.get('id')
@@ -94,14 +92,17 @@ class RoomTypeRemove(APIView):
         instance = RoomType.objects.get(id=pk)
         instance.delete()
         return Response(status=201)
+
+
 ################################################################
 
 
 class GuestList(APIView):
     permission_classes = [permissions.IsAuthenticated]
+
     def post(self, request):
-        name = request.data.get('name',None)
-        surname = request.data.get('surname',None)
+        name = request.data.get('name', None)
+        surname = request.data.get('surname', None)
         guests = Guest.objects.all()
         if not (name is None):
             guests = guests.filter(name__icontains=name)
@@ -110,10 +111,12 @@ class GuestList(APIView):
         serializer = GuestSerializer(guests, many=True)
         return Response(serializer.data)
 
+
 class GuestDetailView(generics.RetrieveAPIView):
     permission_classes = [permissions.IsAuthenticated]
     queryset = Guest.objects.all()
     serializer_class = GuestSerializer
+
 
 class GuestAPIView(APIView):
     def post(self, request):
@@ -141,6 +144,7 @@ class GuestAPIView(APIView):
         else:
             return Response({"status": "error"})
 
+
 class GuestRemove(APIView):
     def post(self, request):
         pk = request.data.get('id')
@@ -149,16 +153,15 @@ class GuestRemove(APIView):
         instance = Guest.objects.get(id=pk)
         instance.delete()
         return Response(status=201)
+
+
 ################################################################
 
-class EquipmentView(generics.ListAPIView):
+class EquipmentGet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated, ]
     queryset = Equipment.objects.all()
     serializer_class = EquipmentViewSerializer
 
-class EquipmentDetailView(generics.RetrieveAPIView):
-    permission_classes = [permissions.IsAuthenticated]
-    queryset = Equipment.objects.all()
-    serializer_class = EquipmentViewSerializer
 
 class EquipmentAPI(APIView):
     def post(self, request):
@@ -178,6 +181,7 @@ class EquipmentAPI(APIView):
         else:
             return Response({"status": "error"})
 
+
 class EquipmentRemove(APIView):
     def post(self, request):
         pk = request.data.get('id')
@@ -186,10 +190,13 @@ class EquipmentRemove(APIView):
         instance = Equipment.objects.get(id=pk)
         instance.delete()
         return Response(status=201)
+
+
 ################################################################
 
 class RoomView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+
     def get(self, request):
         list = None
         if (request.GET['start_date'] is '') and (request.GET['end_date'] is ''):
@@ -199,23 +206,32 @@ class RoomView(APIView):
             end = [int(x) for x in request.GET['end_date'].split('-')]
             start_date = date(start[0], start[1], start[2])
             end_date = date(end[0], end[1], end[2])
-            print(start_date)
-            print(end_date)
             bookings1 = Booking.objects.filter(start_date__range=[start_date, end_date])
             bookings2 = Booking.objects.filter(end_date__range=[start_date, end_date])
+            bookings3 = Booking.objects.filter(end_date__gte=end_date, start_date__lte=start_date)
             list = Room.objects.all() \
                 .exclude(id__in=[o.room.id for o in bookings1]) \
-                .exclude(id__in=[o.room.id for o in bookings2]). \
-                order_by('number')
+                .exclude(id__in=[o.room.id for o in bookings2]) \
+                .exclude(id__in=[o.room.id for o in bookings3]) \
+                .order_by('number')
+        type = request.GET['type']
+        if not (type is None):
+            if int(type) != 0:
+                list = list.filter(type=type)
+                print(list)
         serializer = RoomViewSerializer(list, many=True)
         return Response(serializer.data)
+
 
 class RoomDetailView(generics.RetrieveAPIView):
     permission_classes = [permissions.IsAuthenticated]
     queryset = Room.objects.all()
     serializer_class = RoomViewSerializer
 
+
 class RoomAPI(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
     def post(self, request):
         serializer = RoomSerializer(data=request.data)
         print(serializer)
@@ -231,11 +247,13 @@ class RoomAPI(APIView):
                 instance.rooms_qty = request.data.get('rooms_qty')
                 instance.sleeper_qty = request.data.get('sleeper_qty')
                 instance.daily_price = request.data.get('daily_price')
+                instance.manager = User.objects.get(id=request.data.get('manager'))
                 instance.type = RoomType.objects.get(id=request.data.get('type'))
                 instance.save()
                 return Response({"status": "update"})
         else:
             return Response({"status": "error"})
+
 
 class RoomUpdate(APIView):
     def post(self, request):
@@ -264,23 +282,32 @@ class RoomRemove(APIView):
         instance = Room.objects.get(id=pk)
         instance.delete()
         return Response(status=201)
+
+
 ################################################################
 
 class BookingView(APIView):
     permission_classes = [permissions.IsAuthenticated]
-    def get(self, request):
-        start = request.GET['start_date']
-        end = request.GET['end_date']
-        bookings = Booking.objects\
-            .filter(start_date__range=[f"{start}", f"{end}"],end_date__range=[f"{start}", f"{end}"])\
+
+    def post(self, request):
+        start = request.data.get('start_date', None)
+        end = request.data.get('end_date', None)
+        bookings = Booking.objects \
+            .filter(Q(start_date__range=[f"{start}", f"{end}"]) | Q(end_date__range=[f"{start}", f"{end}"])) \
             .order_by('-id')
+        room_type = request.data.get('room_type', None)
+        if not (room_type is None):
+            if int(room_type) != 0:
+                bookings = bookings.filter(room__type=room_type)
         serializer = BookingViewSerializer(bookings, many=True)
         return Response(serializer.data)
+
 
 class BookingDetailView(generics.RetrieveAPIView):
     permission_classes = [permissions.IsAuthenticated]
     queryset = Booking.objects.all()
     serializer_class = BookingViewSerializer
+
 
 class LastBooking(APIView):
     def post(self, request):
@@ -318,6 +345,7 @@ class BookingAPI(APIView):
         else:
             return Response({"status": "error"})
 
+
 class BookingRemove(APIView):
     def post(self, request):
         pk = request.data.get('id')
@@ -327,6 +355,7 @@ class BookingRemove(APIView):
         instance.delete()
         return Response(status=201)
 
+
 class BookingAddGuest(APIView):
     def post(self, request):
         guest = Guest.objects.get(id=request.data.get('guest'))
@@ -334,18 +363,22 @@ class BookingAddGuest(APIView):
         booking.guests.add(guest)
         return Response({"status": "add"})
 
+
 class BookingRemoveGuest(APIView):
     def post(self, request):
         guest = Guest.objects.get(id=request.data.get('guest'))
         booking = Booking.objects.get(id=request.data.get('booking'))
         booking.guests.remove(guest)
         return Response({"status": "remove"})
+
+
 ################################################################
 class EquipmentListView(APIView):
     def get(self, request):
         list = EquipmentList.objects.all()
         serializer = EquipmentListViewSerializer(list, many=True)
         return Response(serializer.data)
+
 
 class EquipmentListAPI(APIView):
     def post(self, request):
@@ -357,13 +390,14 @@ class EquipmentListAPI(APIView):
                 return Response({"status": "add"})
             else:
                 instance = EquipmentList.objects.get(id=pk)
-                #instance.room = Room.objects.get(id=request.data.get('room'))
-                #instance.enquipment = Equipment.objects.get(id=request.data.get('enquipment'))
+                # instance.room = Room.objects.get(id=request.data.get('room'))
+                # instance.enquipment = Equipment.objects.get(id=request.data.get('enquipment'))
                 instance.qty = request.data.get('qty')
                 instance.save()
                 return Response({"status": "update"})
         else:
             return Response({"status": "error"})
+
 
 class EquipmentListRemove(APIView):
     def post(self, request):

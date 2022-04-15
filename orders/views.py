@@ -13,7 +13,7 @@ from rest_framework.renderers import JSONRenderer
 
 
 def orders_page(request):
-    return render(request, 'index.html', {'orders' : SalesOrder.objects.all()})
+    return render(request, 'index.html', {})
 
 class OrderView(generics.ListAPIView):
     queryset = SalesOrder.objects.all()

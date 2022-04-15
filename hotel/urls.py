@@ -1,16 +1,19 @@
 from .views import *
 from django.urls import path
+from rest_framework.routers import DefaultRouter
 
-urlpatterns = [
+router = DefaultRouter()
+router.register(r'enq_type_get', EnqTypeGet, basename='enq_type')
+router.register(r'room_type_get', RoomTypeGet, basename='room_type')
+router.register(r'equipment_get', EquipmentGet, basename='equipment')
+urlpatterns = router.urls
+
+urlpatterns += [
   path("user_data/", GetUserData.as_view()),
   #EnquipmentType
-  path("enq_type_list/", EnqTypeList.as_view()),
-  path("enq_type_detail/<int:pk>/", EnqTypeDetailView.as_view()),
   path("enq_type/", EnqTypeAPI.as_view()),
   path("remove_enq_type/", EnqTypeRemove.as_view()),
   #RoomType
-  path("room_type_list/", RoomTypeList.as_view()),
-  path("room_type_detail/<int:pk>/", RoomTypeDetailView.as_view()),
   path("room_type/", RoomTypeAPI.as_view()),
   path("remove_room_type/", RoomTypeRemove.as_view()),
   #Guest
@@ -19,8 +22,6 @@ urlpatterns = [
   path("guest/", GuestAPIView.as_view()),
   path("guest_remove/", GuestRemove.as_view()),
   #Equipment
-  path("equipment_view/", EquipmentView.as_view()),
-  path("equipment_detail/<int:pk>/", EquipmentDetailView.as_view()),
   path("equipment/", EquipmentAPI.as_view()),
   path("equipment_remove/", EquipmentRemove.as_view()),
   #Room
