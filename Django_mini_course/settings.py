@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     'products',
     'hotel',
     'rest_framework',
+    'django_filters',
     'django_summernote',
     'rest_framework_simplejwt',
     'rest_framework.authtoken',
@@ -109,6 +110,7 @@ REST_FRAMEWORK = {
         # 'rest_framework_simplejwt.authentication.JWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ),
+    'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend']
     # 'DEFAULT_PARSER_CLASSES': (
     #     'rest_framework_json_api.parsers.JSONParser',
     #     'rest_framework.parsers.FormParser',
@@ -192,3 +194,5 @@ CORS_ORIGIN_ALLOW_ALL = True
 #     "http://localhost:8080",
 #     "http://127.0.0.1:8000",
 # )
+
+

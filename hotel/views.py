@@ -1,6 +1,12 @@
+import os.path
+import django_filters
+from django.http.response import HttpResponse
+from django.utils.encoding import smart_str
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.authtoken.models import Token
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import generics
+from rest_framework import generics, filters
 from rest_framework import viewsets
 from .models import *
 from .serializers import *
@@ -8,22 +14,19 @@ from django.db import connection
 from django.db.models import Q
 from rest_framework import permissions
 from datetime import datetime, timedelta, date
+from openpyxl import Workbook
 
 
 class GetUserData(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        cursor = connection.cursor()
         token = request.headers['Authorization'].split(' ')[1]
-        # print(request.data)
-        cursor.execute(
-            ''' SELECT user_id, username, is_staff FROM authtoken_token JOIN auth_user ON user_id=id WHERE key='{}' 
-            '''.format(token))
-        row = cursor.fetchone()
-        return Response({"user_id": row[0], "username": row[1], "is_staff": row[2]})
+        data = Token.objects.filter(key=token).values('user__id', 'user__username', 'user__is_staff')[0]
+        return Response(data)
 
 
+################################################################
 class EnqTypeGet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, ]
     queryset = EquipmentType.objects.all()
@@ -31,6 +34,8 @@ class EnqTypeGet(viewsets.ModelViewSet):
 
 
 class EnqTypeAPI(APIView):
+    permission_classes = [permissions.IsAuthenticated, ]
+
     def post(self, request):
         serializer = EnqTypeSerializer(data=request.data)
         if serializer.is_valid():
@@ -46,9 +51,7 @@ class EnqTypeAPI(APIView):
         else:
             return Response({"status": "error"})
 
-
-class EnqTypeRemove(APIView):
-    def post(self, request):
+    def delete(self, request):
         pk = request.data.get('id')
         if pk is None:
             return Response(status=500)
@@ -58,8 +61,6 @@ class EnqTypeRemove(APIView):
 
 
 ################################################################
-
-
 class RoomTypeGet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, ]
     queryset = RoomType.objects.all()
@@ -83,9 +84,7 @@ class RoomTypeAPI(APIView):
         else:
             return Response({"status": "error"})
 
-
-class RoomTypeRemove(APIView):
-    def post(self, request):
+    def delete(self, request):
         pk = request.data.get('id')
         if pk is None:
             return Response(status=500)
@@ -95,58 +94,51 @@ class RoomTypeRemove(APIView):
 
 
 ################################################################
-
-
-class GuestList(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def post(self, request):
-        name = request.data.get('name', None)
-        surname = request.data.get('surname', None)
-        guests = Guest.objects.all()
-        if not (name is None):
-            guests = guests.filter(name__icontains=name)
-        if not (surname is None):
-            guests = guests.filter(surname__icontains=surname)
-        serializer = GuestSerializer(guests, many=True)
-        return Response(serializer.data)
-
-
-class GuestDetailView(generics.RetrieveAPIView):
-    permission_classes = [permissions.IsAuthenticated]
+class GuestAPIView(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated, ]
     queryset = Guest.objects.all()
     serializer_class = GuestSerializer
 
+    def get_queryset(self):
+        guests = Guest.objects.all()
+        if self.request.query_params['name']:
+            guests = guests.filter(Q(name__icontains=self.request.query_params['name']) | Q(
+                surname__icontains=self.request.query_params['name']))
+        if self.request.query_params['passport']:
+            guests = guests.filter(Q(pasprot_series__icontains=self.request.query_params['passport']) | Q(
+                pasprot_number=self.request.query_params['passport']))
+        return guests
 
-class GuestAPIView(APIView):
+    @classmethod
+    def get_extra_actions(cls):
+        return []
+
     def post(self, request):
         serializer = GuestSerializer(data=request.data)
         if serializer.is_valid():
-            print('valid')
-            pk = request.data.get('id')
-            if pk is None:
+            pk = request.data.get('id', None)
+            booking_id = request.data.get('booking', None)
+            if (pk is None) and not (booking_id is None):
                 serializer.save()
+                booking = Booking.objects.get(id=booking_id)
+                guest = Guest.objects.all().order_by('-id')[0]
+                booking.guests.add(guest)
                 return Response({"status": "add"})
             else:
                 try:
-                    instance = Guest.objects.get(id=pk)
-                    instance.name = request.data.get('name')
-                    instance.surname = request.data.get('surname')
-                    instance.pasprot_series = request.data.get('pasprot_series')
-                    instance.pasprot_number = request.data.get('pasprot_number')
-                    instance.phone = request.data.get('phone')
-                    instance.email = request.data.get('email')
-                    instance.birth_date = request.data.get('birth_date')
-                    instance.save()
+                    guest = Guest.objects.filter(id=pk)
+                    guest.update(name=request.data.get('name'), surname=request.data.get('surname'),
+                                 pasprot_series=request.data.get('pasprot_series'),
+                                 pasprot_number=request.data.get('pasprot_number'),
+                                 phone=request.data.get('phone'), email=request.data.get('email'),
+                                 birth_date=request.data.get('birth_date'))
                     return Response({"status": "update"})
                 except:
                     return Response({"status": "error"})
         else:
             return Response({"status": "error"})
 
-
-class GuestRemove(APIView):
-    def post(self, request):
+    def delete(self, request):
         pk = request.data.get('id')
         if pk is None:
             return Response(status=500)
@@ -156,6 +148,7 @@ class GuestRemove(APIView):
 
 
 ################################################################
+
 
 class EquipmentGet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, ]
@@ -181,9 +174,7 @@ class EquipmentAPI(APIView):
         else:
             return Response({"status": "error"})
 
-
-class EquipmentRemove(APIView):
-    def post(self, request):
+    def delete(self, request):
         pk = request.data.get('id')
         if pk is None:
             return Response(status=500)
@@ -194,69 +185,42 @@ class EquipmentRemove(APIView):
 
 ################################################################
 
+
 class RoomView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        list = None
-        if (request.GET['start_date'] is '') and (request.GET['end_date'] is ''):
-            list = Room.objects.all()
+        start_date = request.GET.get('start_date', None)
+        end_date = request.GET.get('end_date', None)
+        room_type = request.GET.get('type', None)
+        if not start_date and not end_date:
+            rooms = Room.objects.all()
         else:
-            start = [int(x) for x in request.GET['start_date'].split('-')]
-            end = [int(x) for x in request.GET['end_date'].split('-')]
-            start_date = date(start[0], start[1], start[2])
-            end_date = date(end[0], end[1], end[2])
-            bookings1 = Booking.objects.filter(start_date__range=[start_date, end_date])
-            bookings2 = Booking.objects.filter(end_date__range=[start_date, end_date])
-            bookings3 = Booking.objects.filter(end_date__gte=end_date, start_date__lte=start_date)
-            list = Room.objects.all() \
-                .exclude(id__in=[o.room.id for o in bookings1]) \
-                .exclude(id__in=[o.room.id for o in bookings2]) \
-                .exclude(id__in=[o.room.id for o in bookings3]) \
-                .order_by('number')
-        type = request.GET['type']
-        if not (type is None):
-            if int(type) != 0:
-                list = list.filter(type=type)
-                print(list)
-        serializer = RoomViewSerializer(list, many=True)
+            bookings = Booking.objects.filter(
+                Q(start_date__range=[start_date, end_date]) |
+                Q(end_date__range=[start_date, end_date]) |
+                Q(end_date__gte=end_date, start_date__lte=start_date))
+            rooms = Room.objects.all() \
+                .exclude(id__in=[o.room.id for o in bookings])
+        if room_type:
+            rooms = rooms.filter(type=room_type)
+        serializer = RoomViewSerializer(rooms.order_by('number'), many=True)
         return Response(serializer.data)
 
 
-class RoomDetailView(generics.RetrieveAPIView):
-    permission_classes = [permissions.IsAuthenticated]
-    queryset = Room.objects.all()
-    serializer_class = RoomViewSerializer
-
-
 class RoomAPI(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAdminUser]
 
     def post(self, request):
         serializer = RoomSerializer(data=request.data)
-        print(serializer)
         if serializer.is_valid():
             pk = request.data.get('id')
-            if pk is None:
-                serializer.save()
-                return Response({"status": "add"})
-            else:
-                instance = Room.objects.get(id=pk)
-                instance.number = request.data.get('number')
-                instance.status = request.data.get('status')
-                instance.rooms_qty = request.data.get('rooms_qty')
-                instance.sleeper_qty = request.data.get('sleeper_qty')
-                instance.daily_price = request.data.get('daily_price')
-                instance.manager = User.objects.get(id=request.data.get('manager'))
-                instance.type = RoomType.objects.get(id=request.data.get('type'))
-                instance.save()
-                return Response({"status": "update"})
+            serializer.save()
+            return Response({"status": "add"})
         else:
             return Response({"status": "error"})
 
-
-class RoomUpdate(APIView):
-    def post(self, request):
+    def patch(self, request):
         try:
             pk = request.data.get('id')
             if pk is None:
@@ -273,9 +237,7 @@ class RoomUpdate(APIView):
         except:
             return Response({"status": "error"})
 
-
-class RoomRemove(APIView):
-    def post(self, request):
+    def delete(self, request):
         pk = request.data.get('id')
         if pk is None:
             return Response(status=500)
@@ -285,69 +247,100 @@ class RoomRemove(APIView):
 
 
 ################################################################
-
-class BookingView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def post(self, request):
-        start = request.data.get('start_date', None)
-        end = request.data.get('end_date', None)
-        bookings = Booking.objects \
-            .filter(Q(start_date__range=[f"{start}", f"{end}"]) | Q(end_date__range=[f"{start}", f"{end}"])) \
-            .order_by('-id')
-        room_type = request.data.get('room_type', None)
-        if not (room_type is None):
-            if int(room_type) != 0:
-                bookings = bookings.filter(room__type=room_type)
-        serializer = BookingViewSerializer(bookings, many=True)
-        return Response(serializer.data)
-
-
 class BookingDetailView(generics.RetrieveAPIView):
     permission_classes = [permissions.IsAuthenticated]
     queryset = Booking.objects.all()
     serializer_class = BookingViewSerializer
 
 
-class LastBooking(APIView):
-    def post(self, request):
-        token = request.headers['Authorization'].split(' ')[1]
-        cursor = connection.cursor()
-        cursor.execute(
-            ''' 
-            SELECT MAX(id) FROM hotel_booking JOIN authtoken_token ON manager_id=user_id
-            WHERE key='{}' 
-            '''.format(token))
-        row = cursor.fetchone()
-        print(row)
-        return Response({"id": row[0]})
-
-
 class BookingAPI(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_report(self, data):
+
+        wb = Workbook()
+        ws = wb.active
+        ws.append(['Номер брони', 'Дата начала', 'Дата окончания', 'Комната', 'Итого'])
+        sum = 0.0
+        for item in data:
+            sum += float(item['total'])
+            ws.append([str(item['id']), item['start_date'], item['end_date'], str(item['room']), str(item['total'])])
+        ws.append(['Сумма', str(sum)])
+        return wb
+
+    def get(self, request):
+        start = self.request.query_params['start_date']
+        end = self.request.query_params['end_date']
+        room_type = self.request.query_params['room_type']
+        room_number = self.request.query_params['room_number']
+
+        start = end if end and not start else start
+        end = start if start and not end else end
+        if start and end:
+            bookings = Booking.objects \
+                .filter(Q(start_date__range=[f"{start}", f"{end}"]) |
+                        Q(end_date__range=[f"{start}", f"{end}"]) |
+                        Q(end_date__gte=end, start_date__lte=start)).order_by('-id')
+        else:
+            bookings = Booking.objects.none()
+
+        if room_type and bookings:
+            bookings = bookings.filter(room__type=room_type)
+        if room_number and bookings:
+            bookings = bookings.filter(room__id=room_number)
+        serializer = BookingViewSerializer(bookings, many=True)
+
+        # self.get_report(serializer.data)
+
+        # wb = self.get_report(serializer.data)
+        # wb.save("sample.xlsx")
+        # filename = "example.xlsx"
+
+        # response = HttpResponse(content_type='application/ms-excel')
+        # response['Content-Disposition'] = 'attachment; filename="ThePythonDjango.xlsx"'
+        # wb.save(response)
+
+        # return response
+        # file_path = r"C:\Users\sulin\source\repos\Django_mini_course" + f'\{filename}'
+        # wb.save(filename)
+        # if os.path.exists(file_path):
+        #     print('yes')
+        #     response = HttpResponse(content_type='application/vnd.ms-excel')
+        #     response['Content-Disposition'] = 'attachment; filename=' + os.path.basename(file_path)
+        #     return response
+        wb = self.get_report(serializer.data)
+        wb.save("sample.xlsx")
+
+        return Response(serializer.data)
+
     def post(self, request):
         serializer = BookingSerializer(data=request.data)
         if serializer.is_valid():
             pk = request.data.get('id')
             if pk is None:
-                serializer.save()
-                return Response({"status": "add"})
+                current_booking = serializer.save()
+                if request.data.get('guest[id]'):
+                    guest = Guest.objects.get(id=request.data.get('guest[id]'))
+                else:
+                    guest = Guest(name=request.data.get('guest[name]'), surname=request.data.get('guest[surname]'),
+                                  pasprot_series=request.data.get('guest[pasprot_series]'),
+                                  pasprot_number=request.data.get('guest[pasprot_number]'),
+                                  phone=request.data.get('guest[phone]'), email=request.data.get('guest[email]'),
+                                  birth_date=request.data.get('guest[birth_date]'))
+                    guest.save()
+                current_booking.guests.add(guest)
+                return Response({"status": "add", "id": current_booking.id})
             else:
-                instance = Booking.objects.get(id=pk)
-                instance.room = Room.objects.get(id=request.data.get('room'))
-                instance.start_date = request.data.get('start_date')
-                instance.end_date = request.data.get('end_date')
-                instance.deposit = request.data.get('deposit')
-                instance.total = request.data.get('total')
-                instance.status = request.data.get('status')
-
-                instance.save()
-                return Response({"status": "update"})
+                booking = Booking.objects.filter(id=pk)
+                booking.update(room=int(request.data.get('room')), start_date=request.data.get('start_date'),
+                               end_date=request.data.get('end_date'), deposit=float(request.data.get('deposit')),
+                               total=float(request.data.get('total')),
+                               status=request.data.get('status'), manager=int(request.data.get('manager')))
+                return Response({"status": "update", "id": pk})
         else:
             return Response({"status": "error"})
 
-
-class BookingRemove(APIView):
-    def post(self, request):
+    def delete(self, request):
         pk = request.data.get('id')
         if pk is None:
             return Response(status=500)
@@ -373,14 +366,12 @@ class BookingRemoveGuest(APIView):
 
 
 ################################################################
-class EquipmentListView(APIView):
+class EquipmentListAPI(APIView):
     def get(self, request):
         list = EquipmentList.objects.all()
         serializer = EquipmentListViewSerializer(list, many=True)
         return Response(serializer.data)
 
-
-class EquipmentListAPI(APIView):
     def post(self, request):
         serializer = EquipmentListSerializer(data=request.data)
         if serializer.is_valid():
@@ -390,17 +381,13 @@ class EquipmentListAPI(APIView):
                 return Response({"status": "add"})
             else:
                 instance = EquipmentList.objects.get(id=pk)
-                # instance.room = Room.objects.get(id=request.data.get('room'))
-                # instance.enquipment = Equipment.objects.get(id=request.data.get('enquipment'))
                 instance.qty = request.data.get('qty')
                 instance.save()
                 return Response({"status": "update"})
         else:
             return Response({"status": "error"})
 
-
-class EquipmentListRemove(APIView):
-    def post(self, request):
+    def delete(self, request):
         pk = request.data.get('id')
         if pk is None:
             return Response(status=500)

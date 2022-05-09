@@ -67,7 +67,7 @@ class Booking(models.Model):
     guests = models.ManyToManyField(Guest, blank=True, related_name='related_booking')
 
     def __str__(self):
-        return f'Комната {self.room.number}, c {self.start_date} по {self.end_date}'
+        return f'Комната {self.room.number}, c {self.start_date} по {self.end_date}, всего {self.total} У.Е.'
 
 
 # Табл.7 Список оборудования

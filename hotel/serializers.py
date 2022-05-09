@@ -84,6 +84,7 @@ class BookingViewSerializer(ModelSerializer):
     room = SerializerMethodField(read_only=True)
     roomid = SerializerMethodField(read_only=True)
     type = SerializerMethodField(read_only=True)
+    dailyprice = SerializerMethodField(read_only=True)
     manager = CurrentUserSerializer()
 
     def get_room(self, obj):
@@ -94,6 +95,9 @@ class BookingViewSerializer(ModelSerializer):
 
     def get_type(self, obj):
         return obj.room.type.name
+
+    def get_dailyprice(self,obj):
+        return obj.room.daily_price
 
     class Meta:
         model = Booking
