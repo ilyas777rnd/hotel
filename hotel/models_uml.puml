@@ -1,0 +1,17 @@
+@startuml
+'https://plantuml.com/class-diagram
+
+class EquipmentListAPI{
++ permission_classes = permissions.IsAuthenticated
++ get()
++ post()
++ delete()
+}
+class BookingGuest{
++ permission_classes = permissions.IsAuthenticated
++ post()
++ delete()
+}
+
+
+@enduml

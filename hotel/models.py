@@ -24,7 +24,7 @@ class Guest(models.Model):
     surname = models.CharField(max_length=100, verbose_name='Фамилия')
     pasprot_series = models.CharField(max_length=10, verbose_name='Серия паспорта')
     pasprot_number = models.CharField(max_length=10, verbose_name='Номер паспорта')
-    phone = models.CharField(max_length=15, verbose_name='Телефон')
+    phone = models.CharField(max_length=20, verbose_name='Телефон')
     email = models.CharField(max_length=100, verbose_name='Email')
     birth_date = models.DateField(verbose_name='Дата рождения')
 

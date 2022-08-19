@@ -1,8 +1,7 @@
 import os.path
-import django_filters
-from django.http.response import HttpResponse
-from django.utils.encoding import smart_str
-from django_filters.rest_framework import DjangoFilterBackend
+import calendar
+from django.db.models.aggregates import Sum
+from django.http import HttpResponse
 from rest_framework.authtoken.models import Token
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -17,10 +16,64 @@ from datetime import datetime, timedelta, date
 from openpyxl import Workbook
 
 
+def get_booking_report(data):
+    wb = Workbook()
+    ws = wb.active
+    ws.append(['Номер брони', 'Дата начала', 'Дата окончания', 'Комната', 'Статус', 'Депозит', 'Итого'])
+    sum = 0.0
+    for item in data:
+        if item['status'] == 'Забронирован':
+            sum += float(item['deposit'])
+        else:
+            sum += float(item['total'])
+        ws.append(
+            [str(item['id']), item['start_date'], item['end_date'], str(item['room']), str(item['status']),
+             str(item['deposit']), str(item['total'])])
+    ws.append(['Сумма', str(sum)])
+    return wb
+
+
+def found_bookings(start, end, room_type, room_number, guest, status):
+    start = end if end and not start else start
+    end = start if start and not end else end
+    if start and end:
+        bookings = Booking.objects \
+            .filter(Q(start_date__range=[f"{start}", f"{end}"]) |
+                    Q(end_date__range=[f"{start}", f"{end}"]) |
+                    Q(end_date__gte=end, start_date__lte=start)).order_by('-id')
+        if guest:
+            bookings = bookings.filter(guests__name__icontains=guest)
+        if status:
+            bookings = bookings.filter(status=status)
+    else:
+        bookings = Booking.objects.none()
+    if room_type and bookings:
+        bookings = bookings.filter(room__type=room_type)
+    if room_number and bookings:
+        bookings = bookings.filter(room__id=room_number)
+    return bookings
+
+
+def report_view(request):
+    start = request.GET['start_date']
+    end = request.GET['end_date']
+    room_type = request.GET['room_type']
+    room_number = request.GET['room_number']
+    guest = request.GET['guest']
+    status = request.GET['status']
+    bookings = found_bookings(start, end, room_type, room_number, guest, status)
+    data = BookingViewSerializer(bookings, many=True).data
+    wb = get_booking_report(data)
+    response = HttpResponse(content_type='application/ms-excel')
+    response['Content-Disposition'] = 'attachment; filename="Report.xlsx"'
+    wb.save(response)
+    return response
+
+
 class GetUserData(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def post(self, request):
+    def get(self, request):
         token = request.headers['Authorization'].split(' ')[1]
         data = Token.objects.filter(key=token).values('user__id', 'user__username', 'user__is_staff')[0]
         return Response(data)
@@ -34,7 +87,7 @@ class EnqTypeGet(viewsets.ModelViewSet):
 
 
 class EnqTypeAPI(APIView):
-    permission_classes = [permissions.IsAuthenticated, ]
+    permission_classes = [permissions.IsAdminUser, ]
 
     def post(self, request):
         serializer = EnqTypeSerializer(data=request.data)
@@ -68,6 +121,8 @@ class RoomTypeGet(viewsets.ModelViewSet):
 
 
 class RoomTypeAPI(APIView):
+    permission_classes = [permissions.IsAdminUser, ]
+
     def post(self, request):
         serializer = RoomTypeSerializer(data=request.data)
         # print(serializer)
@@ -138,14 +193,6 @@ class GuestAPIView(generics.ListAPIView):
         else:
             return Response({"status": "error"})
 
-    def delete(self, request):
-        pk = request.data.get('id')
-        if pk is None:
-            return Response(status=500)
-        instance = Guest.objects.get(id=pk)
-        instance.delete()
-        return Response(status=201)
-
 
 ################################################################
 
@@ -157,6 +204,8 @@ class EquipmentGet(viewsets.ModelViewSet):
 
 
 class EquipmentAPI(APIView):
+    permission_classes = [permissions.IsAdminUser, ]
+
     def post(self, request):
         serializer = EquipmentSerializer(data=request.data)
         if serializer.is_valid():
@@ -190,16 +239,18 @@ class RoomView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        start_date = request.GET.get('start_date', None)
-        end_date = request.GET.get('end_date', None)
+        start_date_str = request.GET.get('start_date', None)
+        end_date_str = request.GET.get('end_date', None)
         room_type = request.GET.get('type', None)
-        if not start_date and not end_date:
+        if not start_date_str and not end_date_str:
             rooms = Room.objects.all()
         else:
-            bookings = Booking.objects.filter(
-                Q(start_date__range=[start_date, end_date]) |
-                Q(end_date__range=[start_date, end_date]) |
-                Q(end_date__gte=end_date, start_date__lte=start_date))
+            start = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            if timedelta(1) == (end - start):
+                bookings = Booking.objects.filter(end_date__gte=end, start_date__lte=start)
+            else:
+                bookings = found_bookings(start + timedelta(1), end - timedelta(1), None, None, None, None)
             rooms = Room.objects.all() \
                 .exclude(id__in=[o.room.id for o in bookings])
         if room_type:
@@ -225,14 +276,11 @@ class RoomAPI(APIView):
             pk = request.data.get('id')
             if pk is None:
                 return Response({"status": "error"})
-            instance = Room.objects.get(id=pk)
-            instance.number = request.data.get('number')
-            instance.status = request.data.get('status')
-            instance.rooms_qty = request.data.get('rooms_qty')
-            instance.sleeper_qty = request.data.get('sleeper_qty')
-            instance.daily_price = request.data.get('daily_price')
-            instance.type = RoomType.objects.get(id=request.data.get('type'))
-            instance.save()
+            room = Room.objects.filter(id=pk)
+            room.update(number=request.data.get('number'), rooms_qty=int(request.data.get('rooms_qty')),
+                        sleeper_qty=int(request.data.get('sleeper_qty')),
+                        daily_price=float(request.data.get('daily_price')),
+                        type=RoomType.objects.get(id=request.data.get('type')))
             return Response({"status": "update"})
         except:
             return Response({"status": "error"})
@@ -256,60 +304,15 @@ class BookingDetailView(generics.RetrieveAPIView):
 class BookingAPI(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def get_report(self, data):
-
-        wb = Workbook()
-        ws = wb.active
-        ws.append(['Номер брони', 'Дата начала', 'Дата окончания', 'Комната', 'Итого'])
-        sum = 0.0
-        for item in data:
-            sum += float(item['total'])
-            ws.append([str(item['id']), item['start_date'], item['end_date'], str(item['room']), str(item['total'])])
-        ws.append(['Сумма', str(sum)])
-        return wb
-
     def get(self, request):
         start = self.request.query_params['start_date']
         end = self.request.query_params['end_date']
         room_type = self.request.query_params['room_type']
         room_number = self.request.query_params['room_number']
-
-        start = end if end and not start else start
-        end = start if start and not end else end
-        if start and end:
-            bookings = Booking.objects \
-                .filter(Q(start_date__range=[f"{start}", f"{end}"]) |
-                        Q(end_date__range=[f"{start}", f"{end}"]) |
-                        Q(end_date__gte=end, start_date__lte=start)).order_by('-id')
-        else:
-            bookings = Booking.objects.none()
-
-        if room_type and bookings:
-            bookings = bookings.filter(room__type=room_type)
-        if room_number and bookings:
-            bookings = bookings.filter(room__id=room_number)
+        guest = self.request.query_params['guest']
+        status = self.request.query_params['status']
+        bookings = found_bookings(start, end, room_type, room_number, guest, status)
         serializer = BookingViewSerializer(bookings, many=True)
-
-        # self.get_report(serializer.data)
-
-        # wb = self.get_report(serializer.data)
-        # wb.save("sample.xlsx")
-        # filename = "example.xlsx"
-
-        # response = HttpResponse(content_type='application/ms-excel')
-        # response['Content-Disposition'] = 'attachment; filename="ThePythonDjango.xlsx"'
-        # wb.save(response)
-
-        # return response
-        # file_path = r"C:\Users\sulin\source\repos\Django_mini_course" + f'\{filename}'
-        # wb.save(filename)
-        # if os.path.exists(file_path):
-        #     print('yes')
-        #     response = HttpResponse(content_type='application/vnd.ms-excel')
-        #     response['Content-Disposition'] = 'attachment; filename=' + os.path.basename(file_path)
-        #     return response
-        wb = self.get_report(serializer.data)
-        wb.save("sample.xlsx")
 
         return Response(serializer.data)
 
@@ -350,6 +353,8 @@ class BookingAPI(APIView):
 
 
 class BookingAddGuest(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
     def post(self, request):
         guest = Guest.objects.get(id=request.data.get('guest'))
         booking = Booking.objects.get(id=request.data.get('booking'))
@@ -358,6 +363,8 @@ class BookingAddGuest(APIView):
 
 
 class BookingRemoveGuest(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
     def post(self, request):
         guest = Guest.objects.get(id=request.data.get('guest'))
         booking = Booking.objects.get(id=request.data.get('booking'))
@@ -367,6 +374,8 @@ class BookingRemoveGuest(APIView):
 
 ################################################################
 class EquipmentListAPI(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
     def get(self, request):
         list = EquipmentList.objects.all()
         serializer = EquipmentListViewSerializer(list, many=True)
@@ -394,3 +403,65 @@ class EquipmentListAPI(APIView):
         instance = EquipmentList.objects.get(id=pk)
         instance.delete()
         return Response(status=201)
+
+
+class ReportView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def found_rooms(self, type, capacity):
+        rooms = Room.objects.all()
+        if type:
+            rooms = rooms.filter(type=type)
+        if capacity:
+            rooms = rooms.filter(sleeper_qty=int(capacity)) if int(capacity) < 4 else rooms.filter(sleeper_qty__gte=4)
+        return rooms
+
+    def monthly_report(self, month, type, capacity):
+        result = {}
+        month_split = month.split('-')
+        first_day_of_month = date(int(month_split[0]), int(month_split[1]), 1)
+        last_day_of_month = date(int(month_split[0]), int(month_split[1]),
+                                 calendar.monthrange(int(month_split[0]), int(month_split[1]))[1])
+        all_bookings_in_this_month = found_bookings(first_day_of_month, last_day_of_month, type, None, None, None)
+        rooms = self.found_rooms(type, capacity)
+        booked_rooms = rooms.filter(id__in=[o.room.id for o in all_bookings_in_this_month])
+        result['busy_percent'] = (float(len(booked_rooms)) / float(len(rooms))) * 100.0
+        start_bookings_in_this_month = Booking.objects\
+            .filter(start_date__range=[first_day_of_month, last_day_of_month])
+        result['sum'] = start_bookings_in_this_month.aggregate(Sum('total'))
+        return result
+
+    def daily_report(self, date, type, capacity):
+        result = {}
+        all_bookings_in_this_day = found_bookings(date, date, type, None, None, None)
+        rooms = self.found_rooms(type, capacity)
+        booked_rooms = rooms.filter(id__in=[o.room.id for o in all_bookings_in_this_day])
+        result['busy_percent'] = (float(len(booked_rooms)) / float(len(rooms))) * 100.0
+
+        start_bookings_in_this_day = Booking.objects.filter(start_date=date)
+        result['sum'] = start_bookings_in_this_day.aggregate(Sum('total'))
+        return result
+
+    def get(self, request):
+        start = datetime.strptime(self.request.query_params['start_date'], "%Y-%m-%d").date()
+        end = datetime.strptime(self.request.query_params['end_date'], "%Y-%m-%d").date() + timedelta(1)
+        room_type = self.request.query_params['room_type']
+        capacity = self.request.query_params['capacity']
+        period = self.request.query_params['period']
+        result = {}
+
+        if period == 'daily':
+            date_generated = [start + timedelta(x) for x in range(0, (end - start).days)]
+            for day in date_generated:
+                result[day.isoformat()] = self.daily_report(day, room_type, capacity)
+        elif period == 'monthly':
+            date_generated = [start + timedelta(x) for x in range(0, (end - start).days)]
+            month_set = set()
+            for day in date_generated:
+                month_set.add(day.strftime('%Y-%m'))
+            for month in sorted(month_set):
+                result[month] = self.monthly_report(month, room_type, capacity)
+        else:
+            pass
+        print(result)
+        return Response(result)

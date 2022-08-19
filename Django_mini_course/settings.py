@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'corsheaders',
     'orders',
+    'models2puml',
     'products',
     'hotel',
     'rest_framework',
@@ -78,13 +79,13 @@ WSGI_APPLICATION = 'Django_mini_course.wsgi.application'
 # https://docs.djangoproject.com/en/2.1/ref/settings/#databases
 DATABASES = {
     'default': {
-         'ENGINE': 'django.db.backends.postgresql',
-         'NAME': 'django_mini',
-         'USER': 'postgres',
-         'PASSWORD': '0000',
-         'HOST': 'localhost',
-         'PORT': '7777',
-     }
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'django_mini',
+        'USER': 'postgres',
+        'PASSWORD': '0000',
+        'HOST': 'localhost',
+        'PORT': '7777',
+    }
 }
 
 # Password validation
@@ -194,5 +195,3 @@ CORS_ORIGIN_ALLOW_ALL = True
 #     "http://localhost:8080",
 #     "http://127.0.0.1:8000",
 # )
-
-
